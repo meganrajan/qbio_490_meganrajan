@@ -1,0 +1,70 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath("/Users/meganrajan/Documents/qbio490/qbio_490_meganrajan/analysis_data"))
+```
+
+Next, creating next code chunk
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(version = "3.18")
+
+if (!require("TCGAbiolinks", quietly = TRUE))
+  BiocManager::install("TCGAbiolinks")
+
+if (!require("maftools", quietly = TRUE))
+  BiocManager::install("maftools")
+
+library(BiocManager)
+
+library(TCGAbiolinks)
+
+library(maftools)
+```
+
+Next, I downloaded the TCGA clinical data.
+```{r}
+clin_query <- GDCquery(project = "TCGA-SKCM",
+  data.category = "Clinical",
+  data.type = "Clinical Supplement",
+  data.format = 'BCR Biotab')
+GDCdownload(clin_query)
+clinical.BCRtab.all <- GDCprepare(clin_query)
+```
+
+Next, I pasted the code to load TCGA RNA-seq data.
+```{r}
+rna_query <- GDCquery(project ="TCGA-SKCM",
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts")
+GDCdownload(rna_query)
+rna_se <- GDCprepare(rna_query)
+rna_clinical <- data.frame(rna_se@colData)
+```
+Next, I loaded the TCGA mutation data.
+```{r}
+rna_clinical$Tumor_Sample_Barcode <- rna_clinical$patient
+maf_query <- GDCquery(
+project = 'TCGA-SKCM',
+data.category = "Simple Nucleotide Variation",
+access = "open", # we only have access to somatic mutations which are open access
+data.type = "Masked Somatic Mutation",
+workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+GDCdownload(maf_query)
+maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
+maf_object <- read.maf(maf = maf,
+clinicalData = rna_clinical,
+isTCGA = TRUE)
+```
+
