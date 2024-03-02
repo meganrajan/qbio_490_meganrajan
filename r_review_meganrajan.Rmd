@@ -1,0 +1,295 @@
+---
+title: "r_review_project"
+author: "Megan Rajan"
+date: "2/27/2024"
+output: html_document
+---
+
+Part 1: Review Questions
+
+General Concepts
+
+1. What is TCGA and why is it important?
+  TCGA is The Cancer Genome Atlas. It is important because it is comphrehensive record of the genetic mutations responsible for various types of cancer. It is a valualbe resource for researchers to understand the genetics behind cancer.
+  
+2. What are some strengths and weaknesses of TCGA?
+  Strengths include that TCGA is holds multi-omics data and that it allows researchers to freely access cancer genome data, which supports the development of new cancer therapies. Weaknesses include that the data in TCGA may not fully capture the genetic diversity of the entire global population.
+
+Coding Skills
+  1. What commands are used to save a file to your GitHub repository?
+  git add <filename> -> git commit -m "message" -> git push
+  
+  2. What command(s) must be run in order to use a package in R?
+  You must first install it using install.packages("package") and then load it with library(package).
+  
+  3. What command(s) must be run in order to use a Bioconductor package in R?
+  First, you need to install the package using BiocManager::install() and then you need to load with library(BiocManager).
+  
+  4. What is boolean indexing? What are some applications of it?
+  Boolean indexing is used to select elements of a vector or rows/columns of a dataframe that meet certain conditions. You apply it by creating a boolean vector, where TRUE represents elements that meet the condition and FALSE represents those that do not. Applications of boolean indexing include subsetting data, conditional analysis, and filtering data based on criteria.
+  
+  5. Draw a mock up (just a few rows and columns) of a sample dataframe. Show an example
+  of the following and explain what each line of code does.
+    a. an ifelse() statement
+    b. boolean indexing
+```{r}
+# Sample dataframe
+mock <- data.frame(
+  ID = 1:5,
+  Score = c(85, 90, 75, 50, 95),
+  Pass = c(TRUE, TRUE, TRUE, FALSE, TRUE)
+)
+
+# a. ifelse() statement that creates grade based on score
+mock$Grade <- ifelse(mock$Score >= 90, "A",
+                   ifelse(mock$Score >= 80, "B",
+                          ifelse(mock$Score >= 70, "C", "F")))
+
+# Explanation: For each row in dataframe 'mock' data frame, the ifelse() checks the 'Score' and assigns
+# a grade "A" if the score is 90 or above, "B" if 80 or above, "C" if 70 or above,
+# or "F" otherwise. This results in a new column 'Grade' with the corresponding grades.
+
+# b. Boolean indexing
+# This selects rows where the "Pass" column is TRUE
+passing_students <- mock[mock$Pass, ]
+
+# Explanation: mock$Pass creates a boolean vector with TRUE for rows where the "Pass" column is TRUE. also, mock[mock$Pass, ] uses this boolean vector to index into 'mock', returning only the rows where the condition is TRUE.
+
+```
+  
+    
+  Part 2: SKCM Analysis
+```{r}
+
+knitr::opts_knit$set(root.dir = normalizePath("/Users/meganrajan/Documents/qbio490/qbio_490_meganrajan/analysis_data"))
+```
+
+  
+  
+```{r}
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+clin_query <- GDCquery(project = "TCGA-SKCM",
+  data.category = "Clinical",
+  data.type = "Clinical Supplement",
+  data.format = 'BCR Biotab')
+GDCdownload(clin_query)
+clinical.BCRtab.all <- GDCprepare(clin_query)
+  
+```
+
+
+```{r}
+rad <- clinical.BCRtab.all$clinical_radiation_skcm[-c(1,2),]
+drug <- clinical.BCRtab.all$clinical_drug_skcm[-c(1,2),]
+
+```
+
+2. Mutation differences between metastatic and non-metasstatic patients for multiple genes - co-oncoplot
+```{r}
+
+#packages
+library(SummarizedExperiment)
+
+BiocManager::install("DESeq2")
+library(DESeq2)
+library(ggplot2)
+library(ggrepel)
+BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+
+```
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath("/Users/meganrajan/Documents/qbio490/qbio_490_meganrajan/analysis_data"))
+```
+
+```{r}
+#instantiate object
+rna_query <- GDCquery(project ="TCGA-SKCM",
+                      data.category = "Transcriptome Profiling",
+                      data.type = "Gene Expression Quantification",
+                      workflow.type = "STAR - Counts")
+
+GDCdownload(rna_query)
+rna_se <- GDCprepare(rna_query)
+
+
+
+
+```
+
+1. Difference in survival between metastatic and non-metastatic patients: The KM plot below compares the survival probabilities between two groups: patients with metastatic disease (shown in red) and patients with primary solid tumors (shown in blue). The plot shows that patients with primary solid tumors have a higher survival probability over time compared to those with metastatic disease. This is further supported by a highly significant p-value (p < 0.0001), suggesting that the difference in survival probabilities between the two groups is statistically significant.
+```{r}
+rna_clinical = rna_se@colData
+rna_clinical <- as.data.frame(rna_clinical)
+rna_clinical$Tumor_Sample_Barcode <- rna_clinical$patient
+
+library(survival)
+library(survminer)
+
+# Convert vital_status to a binary numeric variable if it's not already
+rna_clinical$vital_status_num <- as.numeric(rna_clinical$vital_status == "Dead")
+
+
+# Fit Kaplan-Meier survival curves
+surv_obj <- Surv(time = rna_clinical$days_to_death, event = rna_clinical$vital_status_num)
+fit <- survfit(surv_obj ~ rna_clinical$definition, data = rna_clinical)
+
+# Plot KM plot
+ggsurvplot(fit, data = rna_clinical, pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE, # Show risk table
+           legend.title = "Metastatic Status",
+           xlab = "Time", ylab = "Survival probability",
+           break.time.by = 100, # Adjust time intervals
+           risk.table.col = "strata") # Color risk table by groups
+
+```
+
+2. Mutation differences between metastatic and non-metastatic patients for multiple genes in a Co-oncoplot.
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath("/Users/meganrajan/Documents/qbio490/qbio_490_meganrajan/analysis_data"))
+```
+
+```{r}
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+maf_object <- read.csv("/Users/meganrajan/Documents/qbio490/qbio_490_meganrajan/analysis_data/skcm_clinical_data.csv")
+colnames(maf_object)[ colnames(maf_object) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+write.csv(maf_object, "/Users/meganrajan/Documents/qbio490/qbio_490_meganrajan/analysis_data/skcm_clinical_data.csv", row.names = FALSE)
+
+maf_query <- GDCquery(
+    project = "TCGA-SKCM", 
+    data.category = "Simple Nucleotide Variation", 
+    access = "open", # we only have access to somatic mutations which are open access
+    data.type = "Masked Somatic Mutation", 
+    workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+
+# GDCdownload(maf_query) # you shouldn't have to redownload any data!
+
+maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
+
+maf_object <- read.maf(maf = maf, 
+                       clinicalData = rna_clinical,
+                       isTCGA = TRUE)
+
+
+```
+
+```{r}
+maf_clinical = maf_object@clinical.data
+maf_clinical
+meta <- maf_clinical[maf_clinical$definition == "Metastatic", ]
+meta <- meta$Tumor_Sample_Barcode
+meta <- c(meta)
+nonmeta <- maf_clinical[maf_clinical$definition == "Primary solid Tumor", ]
+nonmeta <- nonmeta$Tumor_Sample_Barcode
+nonmeta <- c(nonmeta)
+
+meta_maf <- subsetMaf(maf = maf_object, tsb = meta)
+nonmeta_maf <- subsetMaf(maf = maf_object, tsb = nonmeta)
+
+coOncoplot(m1 = meta_maf,
+           m2 = nonmeta_maf,
+           m1Name = "Metastatic",
+           m2Name = "Non-metastatic",
+           borderCol = NA)
+```
+3. Mutation differences for specific gene of interest (one of most mutated genes) (Co-lollipop plot)
+
+```{r}
+
+lollipopPlot2(m1 = meta_maf,
+           m2 = nonmeta_maf,
+           m1_name = "Metastatic",
+           m2_name = "Non-metastatic",
+           gene = "TTN")
+```
+
+4. Coocurrence or mutual exclusion of common gene mutations: one for metastatic patients, one for non-metastatic patients (2 somatic interation plots)
+
+```{r}
+somatic_interaction_metastatic <- somaticInteractions(maf = meta_maf, 
+                                                      top = 20)
+somatic_interaction_nonmetastatic <- somaticInteractions(maf = nonmeta_maf, 
+                                                         top = 20)
+```
+
+5. DES
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+
+# For Chemotherapy
+
+all_chemo <- drug[drug$pharmaceutical_therapy_type == 'Chemotherapy',]
+rna_clinical$chemotherapy <- ifelse(rna_clinical$patient %in% all_chemo$bcr_patient_barcode, 1, 0)
+
+# immunotherapy
+all_immuno <- drug[drug$pharmaceutical_therapy_type == 'Immunotherapy',]
+rna_clinical$immunotherapy <- ifelse(rna_clinical$patient %in% all_immuno$bcr_patient_barcode, 1, 0)
+
+# radiation
+all_radio <- drug[drug$pharmaceutical_therapy_type == 'Ancillary',]
+rna_clinical$radiation <- ifelse(rna_clinical$patient %in% all_radio$bcr_patient_barcode, 1, 0)
+
+# molecular
+all_molec <- drug[drug$pharmaceutical_therapy_type == 'Targeted Molecular therapy',]
+rna_clinical$molecular <- ifelse(rna_clinical$patient %in% all_molec$bcr_patient_barcode, 1, 0)
+
+# vaccine
+all_vaccine <- drug[drug$pharmaceutical_therapy_type == 'Vaccine',]
+rna_clinical$vaccine <- ifelse(rna_clinical$patient %in% all_vaccine$bcr_patient_barcode, 1, 0)
+
+# Factorize all columns
+rna_clinical$chemotherapy <- factor(rna_clinical$chemotherapy)
+rna_clinical$immunotherapy <- factor(rna_clinical$immunotherapy)
+rna_clinical$radiation <- factor(rna_clinical$radiation)
+rna_clinical$molecular <- factor(rna_clinical$molecular)
+rna_clinical$vaccine <- factor(rna_clinical$vaccine)
+
+rna_clinical$race <- factor(rna_clinical$race)
+rna_clinical$gender <- factor(rna_clinical$gender)
+rna_clinical$vital_status <- factor(rna_clinical$vital_status)
+
+# find counts of rna_se
+countData <- assay(rna_se)
+
+# create the DESeqDataSet
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData = rna_clinical,
+                              design = ~ chemotherapy + immunotherapy + radiation + molecular + vaccine + race + gender + vital_status)
+
+# Filter out genes with low expression
+dds <- dds[rowSums(counts(dds)) > 20, ]
+
+# Run DESeq
+dds <- DESeq(dds)
+
+# Results with thresholding
+res <- results(dds, alpha = 0.05)
+res <- res[!is.na(res$padj) & abs(res$log2FoldChange) > 1, ]
+
+# convert to data frame in order to pass to ggplot
+res_df <- as.data.frame(res) 
+
+# volcano plot using the data frame
+ggplot(res_df, aes(x=log2FoldChange, y=-log10(padj))) + 
+  geom_point(aes(color = padj < 0.05)) + 
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "black")) + 
+  theme_minimal() + 
+  labs(x = "Log2 Fold Change", y = "-Log10 adjusted p-value", title = "Volcano plot of differential expression")
+
+
+```
+
+
+
